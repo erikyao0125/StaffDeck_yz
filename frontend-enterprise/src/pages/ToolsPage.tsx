@@ -56,10 +56,13 @@ import IconChevronDown from '../assets/icons/chevron-down.svg?react';
 import IconClear from '../assets/icons/field-clear.svg?react';
 import IconEdit from '../assets/icons/edit.svg?react';
 import IconMore from '../assets/icons/more.svg?react';
+import IconPause from '../assets/icons/pause.svg?react';
+import IconPlay from '../assets/icons/play.svg?react';
 import IconRefresh from '../assets/icons/refresh.svg?react';
 import IconSearch from '../assets/icons/search.svg?react';
 import IconTool from '../assets/icons/plaza-tool.svg?react';
 import IconTrash from '../assets/icons/trash.svg?react';
+import { ToolStatusFilter } from '@/enums/toolStatus';
 import {
   canManageEmployeeAgent,
   openGalleryAgentId,
@@ -136,6 +139,7 @@ export default function ToolsPage({ currentUser, onLogout }: ToolPageProps = {})
   const [isOverallAgent, setIsOverallAgent] = useState(true);
   const [agentScopeLoaded, setAgentScopeLoaded] = useState(false);
   const [bucketFilter, setBucketFilter] = useState('__all__');
+  const [statusFilter, setStatusFilter] = useState<ToolStatusFilter>(ToolStatusFilter.All);
   const [searchText, setSearchText] = useState('');
   const [loading, setLoading] = useState(false);
   const [agents, setAgents] = useState<AgentProfileRead[]>([]);
@@ -230,7 +234,7 @@ export default function ToolsPage({ currentUser, onLogout }: ToolPageProps = {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentScopeLoaded, isOverallAgent, searchParams, setSearchParams]);
 
-  const visibleRows = useMemo(() => (isOverallAgent ? rows : rows.filter((row) => row.enabled)), [isOverallAgent, rows]);
+  const visibleRows = rows;
   const bucketStats = useMemo(() => buildBucketStats(visibleRows), [visibleRows]);
   const bucketSelectOptions = useMemo(
     () => [
@@ -244,6 +248,10 @@ export default function ToolsPage({ currentUser, onLogout }: ToolPageProps = {})
     return visibleRows.filter((row) => {
       const bucketMatch = bucketFilter === '__all__' || (row.bucket || '未分桶') === bucketFilter;
       if (!bucketMatch) return false;
+      const statusMatch =
+        statusFilter === ToolStatusFilter.All ||
+        (statusFilter === ToolStatusFilter.Enabled ? row.enabled : !row.enabled);
+      if (!statusMatch) return false;
       if (!text) return true;
       return [
         row.name,
@@ -254,9 +262,9 @@ export default function ToolsPage({ currentUser, onLogout }: ToolPageProps = {})
         resourceCreatorName(row),
       ].some((value) => value.toLowerCase().includes(text));
     });
-  }, [bucketFilter, searchText, visibleRows]);
+  }, [bucketFilter, searchText, statusFilter, visibleRows]);
 
-  const pagination = useClientPagination(filteredRows, TOOL_PAGE_SIZE, `${searchText}|${bucketFilter}|${isOverallAgent}`);
+  const pagination = useClientPagination(filteredRows, TOOL_PAGE_SIZE, `${searchText}|${bucketFilter}|${statusFilter}|${isOverallAgent}`);
 
   const stats = useMemo(
     () => ({
@@ -463,6 +471,44 @@ export default function ToolsPage({ currentUser, onLogout }: ToolPageProps = {})
     void loadImportSourceTools(nextSource);
   }
 
+  async function handleToggleTool(row: ToolRead) {
+    const nextEnabled = !row.enabled;
+    const agentSuffix = agentId ? `&agent_id=${encodeURIComponent(agentId)}` : '';
+    const payload = {
+      tenant_id: TENANT_ID,
+      name: row.name,
+      display_name: row.display_name,
+      description: row.description,
+      bucket: row.bucket || '未分桶',
+      tool_type: row.tool_type,
+      method: row.method,
+      url: row.url,
+      headers: row.headers || {},
+      auth: row.auth || {},
+      mcp_config: row.mcp_config || {},
+      execution_policy: row.execution_policy,
+      input_schema: row.input_schema || {},
+      output_schema: row.output_schema || {},
+      allowed_skills: row.allowed_skills || [],
+      capability_scope: row.capability_scope,
+      enabled: nextEnabled,
+    };
+    try {
+      await api.put<ToolRead>(
+        `/api/enterprise/tools/${row.id}?tenant_id=${TENANT_ID}${agentSuffix}`,
+        payload,
+      );
+      notify.success(nextEnabled ? '已启用' : '已停用');
+      announceEnterpriseCapabilityCatalogChange({
+        resourceType: 'tool',
+        agentId: agentId || undefined,
+      });
+      await load();
+    } catch (error) {
+      notify.error(error instanceof Error ? error.message : nextEnabled ? '启用失败' : '停用失败');
+    }
+  }
+
   function renderActions(row: ToolRead) {
     const isMcpChild = row.tool_type === 'mcp' && Boolean(row.mcp_server_id);
     return (
@@ -478,6 +524,12 @@ export default function ToolsPage({ currentUser, onLogout }: ToolPageProps = {})
             <DropdownMenuItem className={MENU_ITEM_CLASS} onSelect={() => navigate(`/enterprise/tools/${row.id}/edit`)}>
               <IconEdit />
               编辑
+            </DropdownMenuItem>
+          )}
+          {canManageCurrentScope && (
+            <DropdownMenuItem className={MENU_ITEM_CLASS} onSelect={() => void handleToggleTool(row)}>
+              {row.enabled ? <IconPause className="size-3.5" /> : <IconPlay className="size-3.5" />}
+              {row.enabled ? '停用' : '启用'}
             </DropdownMenuItem>
           )}
           <DropdownMenuItem className={MENU_ITEM_CLASS} onSelect={() => navigate(`/enterprise/tools/${row.id}/test`)}>
@@ -860,6 +912,19 @@ export default function ToolsPage({ currentUser, onLogout }: ToolPageProps = {})
                     {item.label}
                   </SelectItem>
                 ))}
+              </SelectContent>
+            </UISelect>
+            <UISelect
+              value={statusFilter}
+              onValueChange={(value) => setStatusFilter(value as ToolStatusFilter)}
+            >
+              <SelectTrigger className={cn(SELECT_TRIGGER_CLASS, 'w-[140px]')} aria-label="状态筛选">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ToolStatusFilter.All}>全部状态</SelectItem>
+                <SelectItem value={ToolStatusFilter.Enabled}>已启用</SelectItem>
+                <SelectItem value={ToolStatusFilter.Disabled}>已停用</SelectItem>
               </SelectContent>
             </UISelect>
           </div>
@@ -2596,7 +2661,7 @@ export function buildToolPayload(values: ToolFormValues) {
   }
 }
 
-function buildBucketStats(rows: ToolRead[]) {
+export function buildBucketStats(rows: ToolRead[]) {
   const map = new Map<string, { bucket: string; total: number; enabled: number; disabled: number }>();
   rows.forEach((row) => {
     const bucket = row.bucket || '未分桶';

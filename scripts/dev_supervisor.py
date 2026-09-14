@@ -26,7 +26,7 @@ def env_value(name: str, default: str) -> str:
 
 
 SINGLE_PORT = env_value("SINGLE_PORT", "1") != "0"
-APP_HOST = env_value("APP_HOST", "127.0.0.1")
+APP_HOST = env_value("APP_HOST", "0.0.0.0")
 APP_PORT = env_value("APP_PORT", "5173")
 BACKEND_HOST = env_value("BACKEND_HOST", "127.0.0.1")
 BACKEND_PORT = env_value("BACKEND_PORT", "8000")
@@ -44,6 +44,7 @@ if SINGLE_PORT:
         [
             f"http://localhost:{APP_PORT}",
             f"http://127.0.0.1:{APP_PORT}",
+            f"http://0.0.0.0:{APP_PORT}",
         ]
     )
 else:
@@ -57,7 +58,7 @@ CORS_ORIGINS = env_value("CORS_ORIGINS", default_cors_origins)
 
 
 def url_host(host: str) -> str:
-    return "127.0.0.1" if host == "0.0.0.0" else host
+    return host
 
 
 def log(message: str) -> None:
